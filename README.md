@@ -55,7 +55,7 @@ This project is actively seeking contributions to address several specific chall
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/ai-chatbot.git
+   git clone https://github.com/suryanshsharma19/ai-chatbot.git
    cd ai-chatbot
    ```
 
