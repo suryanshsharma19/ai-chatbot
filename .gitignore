@@ -40,4 +40,9 @@ Thumbs.db
 # Project specific
 *.log
 chat_history/
-temp/ 
+temp/
+chatbot_settings.json
+*.key
+*.secret
+.env.local
+.env.production 

@@ -5,5 +5,5 @@ cd "$(dirname "$0")"
 source .venv/bin/activate
 
 
-echo "Starting chatbot GUI..."
-python gui.py
+echo "Starting Ultra Enhanced Chatbot GUI..."
+python ultra_gui.py

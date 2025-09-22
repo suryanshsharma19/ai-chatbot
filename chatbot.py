@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import os
 import logging
-from huggingface_hub import InferenceClient
+import google.generativeai as genai
 from memory import ConversationMemory
 from intents import handle_intent
 from nlu import analyze_message
@@ -14,39 +14,54 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-HF_API_TOKEN = os.getenv("HUGGINGFACE_API_TOKEN")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GEMINI_MODEL = "gemini-1.5-flash"
 
-# Using a more conversational model
-DEFAULT_MODEL_ID = "facebook/blenderbot-400M-distill"
-HF_MODEL_ID = os.getenv("HUGGINGFACE_MODEL_ID", DEFAULT_MODEL_ID)
-
-def init_huggingface_client():
-    """Initialize and test the Hugging Face client connection"""
-    if not HF_API_TOKEN:
-        logger.error("Hugging Face API token not found. Please set HUGGINGFACE_API_TOKEN in your .env file.")
+def init_gemini_client():
+    # Set up the Google Gemini AI client for chat responses
+    if not GOOGLE_API_KEY or GOOGLE_API_KEY in ["your_api_key_here", "test_disabled"]:
+        logger.warning("Google API key not found or is placeholder. Please set GOOGLE_API_KEY in your .env file.")
+        logger.info("Running in fallback mode without AI model.")
         return None
     
     try:
-        client = InferenceClient(
-            token=HF_API_TOKEN,
-            timeout=30  # Increase timeout to 30 seconds
-        )
-        
-        # Test the connection with a simple query
-        logger.info("Testing Hugging Face API connection...")
-        test_response = client.text_generation(
-            "Hello",
-            model=HF_MODEL_ID,
-            max_new_tokens=10,
-            timeout=10
-        )
-        logger.info("Hugging Face API connection test successful")
-        return client
+        genai.configure(api_key=GOOGLE_API_KEY)
+        model = genai.GenerativeModel(GEMINI_MODEL)
+        logger.info("Google Gemini client initialized successfully")
+        return model
     except Exception as e:
-        logger.error(f"Failed to initialize Hugging Face client: {e}")
+        logger.error(f"Failed to initialize Google Gemini client: {e}")
+        logger.info("Running in fallback mode without AI model.")
         return None
 
-hf_client = init_huggingface_client()
+def get_simple_response(message):
+    # Provide basic responses when the AI model isn't available
+    message_lower = message.lower()
+    
+    greetings = ["hello", "hi", "hey", "greetings"]
+    if any(greeting in message_lower for greeting in greetings):
+        return "Hello! How can I help you today?"
+    
+    questions = ["how are you", "how do you do"]
+    if any(question in message_lower for question in questions):
+        return "I'm doing well, thank you for asking! How can I assist you?"
+    
+    farewells = ["goodbye", "bye", "see you", "farewell"]
+    if any(farewell in message_lower for farewell in farewells):
+        return "Goodbye! Have a great day!"
+    
+    thanks = ["thank", "thanks"]
+    if any(thank in message_lower for thank in thanks):
+        return "You're welcome! Is there anything else I can help you with?"
+    
+    help_words = ["help", "assist", "support"]
+    if any(help_word in message_lower for help_word in help_words):
+        return "I'm here to help! You can ask me about the weather, jokes, time, or just have a conversation."
+    
+    # Default response
+    return "I understand you're trying to communicate with me. While my advanced AI features aren't available right now, I can still help with basic questions about weather, jokes, and time!"
+
+ai_client = init_gemini_client()
 
 app = Flask(__name__)
 memory = ConversationMemory(max_history=5)
@@ -90,12 +105,13 @@ def chat():
     except Exception as e:
         logger.error(f"NLU analysis failed: {e}")
 
-    # Fall back to the language model
-    if not hf_client:
-        return jsonify({
-            "reply": "I apologize, but my language model is currently unavailable. Please try again later.",
-            "error": "Model not configured"
-        }), 503
+    # Fall back to the language model or simple responses
+    if not ai_client:
+        # Simple rule-based fallback responses
+        memory.add_message("user", user_message)
+        simple_response = get_simple_response(user_message)
+        memory.add_message("assistant", simple_response)
+        return jsonify({"reply": simple_response})
 
     try:
         # Add the user message to memory
@@ -111,18 +127,23 @@ def chat():
 
         for attempt in range(max_retries):
             try:
-                # Generate response using the model with increased timeout
-                response = hf_client.text_generation(
-                    history,
-                    model=HF_MODEL_ID,
-                    max_new_tokens=150,
-                    temperature=0.8,
-                    top_p=0.95,
-                    repetition_penalty=1.2,
-                    do_sample=True,
-                    stop_sequences=["\nUser:", "\nChatbot:", "<|endoftext|>"],
-                    timeout=30  # 30 second timeout
-                )
+                # Use thread-safe timeout with concurrent.futures
+                import concurrent.futures
+                
+                def call_gemini_api():
+                    # Generate response using Google Gemini
+                    prompt = f"You are a helpful and friendly chatbot. Previous conversation:\n{history}\n\nRespond naturally and concisely to the user's message."
+                    response_obj = ai_client.generate_content(prompt)
+                    return response_obj.text
+                
+                try:
+                    # Execute with timeout
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(call_gemini_api)
+                        response = future.result(timeout=10)  # 10 second timeout
+                except concurrent.futures.TimeoutError:
+                    logger.warning(f"Gemini API timeout on attempt {attempt + 1}, falling back...")
+                    raise requests.exceptions.Timeout("Gemini API timeout")
 
                 # Clean up the response
                 reply = response.strip()
@@ -142,9 +163,14 @@ def chat():
                 memory.add_message("assistant", reply)
                 return jsonify({"reply": reply})
 
-            except requests.exceptions.Timeout:
+            except (requests.exceptions.Timeout, TimeoutError):
                 last_error = "Request timed out"
                 logger.warning(f"Attempt {attempt + 1}/{max_retries} timed out. Retrying...")
+                if attempt == max_retries - 1:  # Last attempt
+                    # Use fallback response immediately
+                    fallback_response = get_simple_response(user_message)
+                    memory.add_message("assistant", fallback_response)
+                    return jsonify({"reply": fallback_response})
                 time.sleep(retry_delay)
             except Exception as e:
                 last_error = str(e)
@@ -166,4 +192,4 @@ def chat():
         }), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5003)

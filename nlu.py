@@ -13,10 +13,10 @@ except OSError:
     nlp = None 
 
 def analyze_message(message):
-    """Analyze the user message for intents and entities."""
+    # Figure out what the user wants based on their message
     if nlp is None:
          logger.warning("spaCy model not loaded. Skipping NLU analysis.")
-         return {"intent": "general", "entities": []} # Basic fallback
+         return {"intent": "general", "entities": []}  # Just return general intent if NLU isn't working
 
     doc = nlp(message)
 

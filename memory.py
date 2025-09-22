@@ -1,47 +1,28 @@
 
 class ConversationMemory:
-    """
-    A class to manage conversation history for maintaining context in a chatbot.
-    """
+    # Manages conversation history to keep track of context
     def __init__(self, max_history=10):
-        # Initialize the conversation with a system prompt (optional, adapt as needed)
+        # Set up the system prompt and conversation history
         self.system_prompt = "You are a helpful and friendly chatbot."
         self.conversation = []
         self.max_history = max_history
 
     def add_message(self, role, content):
-        """
-        Add a message to the conversation.
-
-        Args:
-            role (str): The role of the message sender ('user' or 'assistant').
-            content (str): The message content.
-        """
+        # Add a new message from either user or assistant to the conversation
         self.conversation.append({"role": role, "content": content})
-        # Keep memory size manageable
+        # Don't let the conversation history get too long
         if len(self.conversation) > self.max_history * 2 : 
              self.conversation.pop(0)
              self.conversation.pop(0)
 
 
     def get_conversation_history(self):
-        """
-        Retrieve the recent conversation history.
-
-        Returns:
-            list: A list of message dictionaries [{role: ..., content: ...}].
-        """
+        # Get the conversation history as a list
         # Return a copy to prevent external modification
         return list(self.conversation)
 
     def get_formatted_history_string(self, include_system_prompt=True):
-        """
-        Formats the conversation history into a single string,
-        suitable for models expecting plain text history.
-
-        Returns:
-            str: Formatted conversation string.
-        """
+        # Convert conversation to a formatted string for models that need text input
         formatted = ""
         if include_system_prompt and self.system_prompt:
              formatted += f"System: {self.system_prompt}\n"
@@ -52,7 +33,5 @@ class ConversationMemory:
 
 
     def clear_memory(self):
-        """
-        Clear the conversation memory.
-        """
+        # Reset the conversation history
         self.conversation = []

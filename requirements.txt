@@ -2,7 +2,7 @@ flask
 requests
 python-dotenv
 spacy
-huggingface_hub
+google-generativeai
 PySide6
 # After installing requirements, run:
 # python -m spacy download en_core_web_sm
